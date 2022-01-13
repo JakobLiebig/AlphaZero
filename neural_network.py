@@ -6,10 +6,7 @@ class Base(torch.nn.Module):
     def __init__(self):
         super().__init__()
     
-    def call(self, x: np.array, mask: np.array) -> Tuple[np.array, np.array]:
-        raise NotImplementedError
-    
-    def forward(self, x, mask) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, x: np.array, mask: np.array) -> Tuple[np.array, np.array]:
         raise NotImplementedError
 
     def fit(self, examples) -> float:
