@@ -17,13 +17,13 @@ initial_state = GameState.initial(8, 8)
 logger_ = Logger()
 trainer = coach.Coach(initial_state, 1000, logger_)
 
-batch_size = 1
+batch_size = 64
 
-mcts_iterations = 1
+mcts_iterations = 500
 train_temperature = 2.
 eval_temperature = 4.
 
-iterations = 1
+iterations = 200
 train_iterations = 1
 eval_iterations = 1
 
@@ -34,4 +34,4 @@ for _ in range(iterations):
     new_contestant = deepcopy(current_best)
     trainer.train(new_contestant, train_iterations, batch_size, train_temperature, mcts_iterations)
     
-    current_best = trainer.pit([current_best, new_contestant], eval_iterations)
+    current_best, win_perc = trainer.pit([current_best, new_contestant], eval_iterations, eval_temperature, mcts_iterations)

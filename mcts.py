@@ -8,11 +8,12 @@ import neural_network
 EPSILON = 1e-10
 
 class Node:
-    def root(self, initial_state: game_state.Base):
+    def root(initial_state: game_state.Base):
         return Node(None, None, None, initial_state)
     
-    def __init__(self, parent, prior_prob, state : game_state.Base):
+    def __init__(self, parent, parent_action, prior_prob, state : game_state.Base):
         self.parent = parent
+        self.parent_action = parent_action
         self.prior_prob = prior_prob
         
         self.num_visits = 0
@@ -52,7 +53,7 @@ class Node:
             prior_prob = policy[index]
             
             new_state = self.state.step(action)
-            new_child = Node(self, prior_prob, new_state)
+            new_child = Node(self, action, prior_prob, new_state)
             
             self.children.append(new_child)
     
@@ -70,11 +71,14 @@ class Node:
         return self.num_visits 
     
     def policy(self, temperature) -> np.array:
-        policy = np.zeros(len(self.children))
+        policy = np.zeros(len(self.children), dtype=np.float32)
         
         for index, child in enumerate(self.children):
             policy[index] = child.num_visits ** temperature
-         
+        
+        if len(policy) == 0:
+            print()
+        
         return policy / policy.sum()
 
 class Tree:
@@ -83,14 +87,14 @@ class Tree:
         self.nn = nn
 
     def search(self, iterations: int, temperature: float) -> np.array:
-        iterations -= self.root.num_visits
+        iterations = iterations - self.root.num_visits
         
         for _ in range(iterations):
             selected_node = self.root.traverse()
             
             if not selected_node.state.is_terminal():
-                board_state = selected_node.state.generate_state()
-                action_mask = selected_node.state.generate_mask()
+                board_state = selected_node.state.generate_state()[None]
+                action_mask = selected_node.state.generate_mask()[None]
                 
                 value, policy = self.nn(board_state, action_mask)
                 
@@ -102,7 +106,10 @@ class Tree:
         
         return self.root.policy(temperature)
 
-    def select(self, actions):
-        
-        for action in actions:
-            self.root = self.root.step(action)
+    def select(self, action):
+        for child in self.root.children:
+            
+            if child.parent_action == action:
+                self.root = child
+                
+                return

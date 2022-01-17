@@ -1,8 +1,19 @@
-from turtle import forward
+from email import policy
 import torch
 import torch.nn as nn
+import numpy as np
 
 import neural_network
+
+def masked_softmax(x, mask, sum_dim):
+    exp_x = x.exp()
+    zeros_like_x = torch.zeros_like(x)
+
+    masked_exp_x = torch.where(mask, exp_x, zeros_like_x)
+    masked_exp_x_sum = masked_exp_x.sum(sum_dim, keepdim=True)
+
+    masked_softmax = torch.where(mask, exp_x / (masked_exp_x_sum + 1e-8), zeros_like_x)
+    return masked_softmax
 
 class NeuralNetwork(neural_network.Base):
     def __init__(self, state_shape, action_space, device):
@@ -12,8 +23,8 @@ class NeuralNetwork(neural_network.Base):
             nn.Conv2d(state_shape[0], 16, (5), padding='same'),
             nn.BatchNorm2d(16),
             nn.ReLU(),
-            nn.Conv2d(16, 8, (4), padding='same'),
-            nn.BatchNorm2d(4),
+            nn.Conv2d(16, 8, (3), padding='same'),
+            nn.BatchNorm2d(8),
             nn.ReLU(),
             nn.Conv2d(8, 4, (3), padding='same'),
             nn.BatchNorm2d(4),
@@ -22,18 +33,18 @@ class NeuralNetwork(neural_network.Base):
         ) 
 
         self.policy_stream = nn.Sequential(
-            nn.Linear(..., 200),
-            nn.ReLU(),
-            nn.Linear(200, 1)
-        )
-        
-        self.value_stream = nn.Sequential(
-            nn.Linear(..., 200),
+            nn.Linear(256, 200),
             nn.ReLU(),
             nn.Linear(200, action_space)
         )
+        
+        self.value_stream = nn.Sequential(
+            nn.Linear(256, 200),
+            nn.ReLU(),
+            nn.Linear(200, 1)
+        )
 
-        self.softmax = nn.Softmax(1)
+        self.softmax = nn.Softmax(0)
     
         self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=1e-5)
         self.mse = nn.MSELoss()
@@ -44,25 +55,25 @@ class NeuralNetwork(neural_network.Base):
         x = self.common(x)
         
         value = self.value_stream(x)
-        policy = self.policy_stream(x).masked_select(mask)
-        policy = self.softmax(policy)
+        policy = masked_softmax(self.policy_stream(x), mask, 1)
+        policy = policy.masked_select(mask)
         
         return value, policy
 
     def __call__(self, x, mask):
-        x = torch.from_numpy(x, device=self.device)
-        mask = torch.from_numpy(mask, device=self.device)
+        x = torch.from_numpy(x).to(self.device)
+        mask = torch.from_numpy(mask).to(self.device)
         
         value, policy = self.forward(x, mask)
         
-        value = value.cpu().numpy()
-        policy = policy.cpu().numpy()
+        value = value.detach().cpu().numpy()
+        policy = policy.detach().cpu().numpy()
         
         return value, policy      
         
         
-    def _calc_loss(self, examples):
-        x, mask, value_target, policy_target = [torch.from_numpy(x, device=self.device) for x in examples]
+    def _calc_loss(self, *examples):
+        x, mask, value_target, policy_target = [torch.from_numpy(x).to(self.device) for x in examples]
         
         value, policy = self.forward(x, mask)
         
@@ -70,11 +81,18 @@ class NeuralNetwork(neural_network.Base):
         return loss
         
     def fit(self, examples):
-        loss = self._calc_loss(examples)
+        x, mask, value_target, policy_target = examples
+        
+        x = np.stack(x)
+        mask = np.stack(mask)
+        value_target = np.stack(value_target)
+        policy_target = np.concatenate(policy_target, 0)
+        
+        loss = self._calc_loss(x, mask, value_target, policy_target)
         
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         
-        loss = float(loss.cpu().numpy())
+        loss = float(loss.detach().cpu().numpy())
         return loss

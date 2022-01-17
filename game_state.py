@@ -4,7 +4,7 @@ class Base():
     def step(self, action): # -> Base
         raise NotImplementedError
     
-    def is_terminal(self) -> bool:
+    def game_over(self) -> bool:
         raise NotImplementedError
     
     def get_reward(self) -> float:

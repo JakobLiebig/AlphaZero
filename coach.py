@@ -12,12 +12,15 @@ class ReplayBuffer:
     def __init__(self, maxlen):
         self.memory = deque(maxlen=maxlen)
     
+    def __len__(self):
+        return len(self.memory)
+    
     def extend(self, states, masks, values, policys):
         self.memory.extend(zip(states, masks, values, policys))
         
     def sample(self, size):
         sample = random.sample(self.memory, size)
-        states, masks, values, policys = [np.stack(x) for x in zip(*sample)]
+        states, masks, values, policys = zip(*sample)
         
         return states, masks, values, policys
 
@@ -30,7 +33,7 @@ class Coach():
     def _try_log(self, *args):
         
         if not self.logger is None:
-            self.logger.log(args)
+            self.logger.log(*args)
     
     def _self_play(self, nn: neural_network.Base, temperature, search_iterations):
         current_state = self.inital_state
@@ -45,7 +48,7 @@ class Coach():
             action = np.random.choice(current_state.generate_possible_actions(), p=policy)
             
             states.append(current_state.generate_state())
-            action_masks.append(current_state.generate_action_mask())
+            action_masks.append(current_state.generate_mask())
             policys.append(policy)
             
             current_state = current_state.step(action)
@@ -59,53 +62,57 @@ class Coach():
             
             outcome = -outcome
         
-        return states, action_masks, policys, values[::-1]
+        return states, action_masks, values[::-1], policys
     
     def train(self, nn: neural_network.Base, iterations, batch_size, temperature, search_iterations):
-        self._try_log(type='event start training', message='')
+        self._try_log('event start training', '')
         
         for i in range(iterations):
             transitions = self._self_play(nn, temperature, search_iterations)
-            self.replay_buffer.append(transitions)
+            self.replay_buffer.extend(*transitions)
 
-            sample = self.replay_buffer.sample(batch_size)
-            loss = nn.fit(sample)
+            if len(self.replay_buffer) >= batch_size:
+                sample = self.replay_buffer.sample(batch_size)
+                loss = nn.fit(sample)
             
-            self._try_log(type='loss', message=loss)
-            self._try_log(type='progress training', message=i / iterations)
+                self._try_log('loss', loss)
+            self._try_log('progress training', i / iterations)
         
-        self._try_log(type='event stop training', message='')
+        self._try_log('event stop training', '')
         
         
-    def _play(self, contestants, scores, temperature):
+    def _play(self, nns, scores, search_iterations, temperature):
         current_state = self.inital_state
-        active_player = random.choice([0, 1])
+        active_player = 0
+        trees = []
         
-        while not current_state.is_terminal:
-            policy = contestants[active_player].policy(temperature)
+        while not current_state.is_terminal():
+            if len(trees) != 2:
+                trees.append(mcts.Tree(current_state, nns[len(trees)]))
+            
+            policy = trees[active_player].search(search_iterations, temperature)
             action = np.random.choice(current_state.generate_possible_actions(), p=policy)
             
             active_player = 0 if active_player == 1 else 1
             
             current_state = current_state.step(action)
-            [contestant.select(action) for contestant in contestants]
+            [tree.select(action) for tree in trees]
             
         outcome = current_state.get_reward()
         scores[active_player] = -outcome
         
-    def pit(self, nns, iterations, temperature):
+    def pit(self, nns, iterations, temperature, search_iterations):
         scores = np.zeros(2)
-        contestants = [mcts.Tree(self.inital_state, nn) for nn in nns]
         
-        self._try_log(type='event start evaluation', message='')
+        self._try_log('event start evaluation', '')
              
         for i in range(iterations):
-            self._play(contestants, scores, temperature)
+            self._play(nns, scores, search_iterations, temperature)
             
-            self._try_log(type='progress evaluation', message=i / iterations)
+            self._try_log('progress evaluation', i / iterations)
         
         winner = nns[scores.argmax()]
         
-        self._try_log(type='event stop evaluation', message=f'winner= {str(winner)}')
+        self._try_log('event stop evaluation', f'winner= {str(winner)}')
 
         return winner, scores
